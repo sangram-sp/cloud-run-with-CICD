@@ -30,64 +30,72 @@
 name: 'Build and Deploy to Cloud Run'
 
 on:
-  push:
-    branches:
-      - 'main'
+push:
+branches:
+  - 'main'
 
 env:
-  PROJECT_ID: 'learncloudrun-499716'
-  REGION: 'us-central1'
-  SERVICE: 'learning-cloud-run'
-  WORKLOAD_IDENTITY_PROVIDER: 'projects/392108010352/locations/global/workloadIdentityPools/github-pool/providers/github-provider'
-  SERVICE_ACCOUNT: 'github-deployer@learncloudrun-499716.iam.gserviceaccount.com'
+PROJECT_ID: 'learncloudrun-499716'
+REGION: 'us-central1'
+SERVICE: 'learning-cloud-run'
+WORKLOAD_IDENTITY_PROVIDER: 'projects/392108010352/locations/global/workloadIdentityPools/github-pool/providers/github-provider'
+SERVICE_ACCOUNT: 'github-deployer@learncloudrun-499716.iam.gserviceaccount.com'
 
 jobs:
-  deploy:
-    runs-on: 'ubuntu-latest'
+deploy:
+runs-on: 'ubuntu-latest'
 
-    permissions:
-      contents: 'read'
-      id-token: 'write'
+permissions:
+  contents: 'read'
+  id-token: 'write'
 
-    steps:
-      - name: 'Checkout'
-        uses: 'actions/checkout@v4'
+steps:
+  - name: 'Checkout'
+    uses: actions/checkout@v4
 
-      - name: 'Debug GitHub Context'
-        run: |
-          echo "repository=${{ github.repository }}"
-          echo "repository_owner=${{ github.repository_owner }}"
-          echo "ref=${{ github.ref }}"
-          echo "actor=${{ github.actor }}"
+  - name: 'Debug GitHub Context'
+    run: |
+      echo "repository=${{ github.repository }}"
+      echo "repository_owner=${{ github.repository_owner }}"
+      echo "ref=${{ github.ref }}"
+      echo "actor=${{ github.actor }}"
 
-      - id: 'auth'
-        name: 'Authenticate to Google Cloud'
-        uses: 'google-github-actions/auth@v2'
-        with:
-          workload_identity_provider: '${{ env.WORKLOAD_IDENTITY_PROVIDER }}'
-          service_account: '${{ env.SERVICE_ACCOUNT }}'
+  - id: 'auth'
+    name: 'Authenticate to Google Cloud'
+    uses: google-github-actions/auth@v2
+    with:
+      workload_identity_provider: '${{ env.WORKLOAD_IDENTITY_PROVIDER }}'
+      service_account: '${{ env.SERVICE_ACCOUNT }}'
+      token_format: 'access_token'
 
-      - name: 'Docker Auth'
-        uses: 'docker/login-action@v3'
-        with:
-          username: 'oauth2accesstoken'
-          password: '${{ steps.auth.outputs.auth_token }}'
-          registry: '${{ env.REGION }}-docker.pkg.dev'
+  - name: 'Set up Cloud SDK'
+    uses: google-github-actions/setup-gcloud@v2
 
-      - name: 'Build and Push Container'
-        run: |
-          DOCKER_TAG="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.SERVICE }}/${{ env.SERVICE }}:${{ github.sha }}"
-          docker build --tag "${DOCKER_TAG}" .
-          docker push "${DOCKER_TAG}"
+  - name: 'Verify Authenticated Account'
+    run: |
+      gcloud auth list
 
-      - id: 'deploy'
-        name: 'Deploy to Cloud Run'
-        uses: 'google-github-actions/deploy-cloudrun@v2'
-        with:
-          service: '${{ env.SERVICE }}'
-          region: '${{ env.REGION }}'
-          image: '${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.SERVICE }}/${{ env.SERVICE }}:${{ github.sha }}'
+  - name: 'Configure Docker Authentication'
+    run: |
+      gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
 
-      - name: 'Show output'
-        run: |
-          echo "${{ steps.deploy.outputs.url }}"
+  - name: 'Build and Push Container'
+    run: |
+      DOCKER_TAG="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.SERVICE }}/${{ env.SERVICE }}:${{ github.sha }}"
+      echo "Building image: ${DOCKER_TAG}"
+
+      docker build --tag "${DOCKER_TAG}" .
+      docker push "${DOCKER_TAG}"
+
+  - id: 'deploy'
+    name: 'Deploy to Cloud Run'
+    uses: google-github-actions/deploy-cloudrun@v2
+    with:
+      service: '${{ env.SERVICE }}'
+      region: '${{ env.REGION }}'
+      image: '${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.SERVICE }}/${{ env.SERVICE }}:${{ github.sha }}'
+
+  - name: 'Show output'
+    run: |
+      echo "Cloud Run URL:"
+      echo "${{ steps.deploy.outputs.url }}"
